@@ -6,6 +6,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"os"
 
 	"cloud.google.com/go/firestore"
 	quote "example.com/server/utils"
@@ -63,6 +64,7 @@ func (h *Handler) GetQuoteById() httprouter.Handle {
 }
 
 func main() {
+	port := os.Getenv("PORT")
 	rq := req.New()
 	ctx := context.Background()
 	mux := httprouter.New()
@@ -88,5 +90,5 @@ func main() {
 	mux.GET("/quote/:id", handler.GetQuoteById())
 	mux.POST("/quote", handler.AddQuote())
 
-	log.Fatal(http.ListenAndServe(":3000", mux))
+	log.Fatal(http.ListenAndServe(":"+port, mux))
 }
