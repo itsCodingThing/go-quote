@@ -1,4 +1,4 @@
-module example.com/server
+module github.com/go-server
 
 go 1.16
 
