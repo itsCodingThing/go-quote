@@ -2,72 +2,29 @@ package main
 
 import (
 	"context"
-	"encoding/json"
-	"io"
 	"log"
-	"net/http"
+	"math/rand"
 	"os"
+	"time"
 
-	"cloud.google.com/go/firestore"
-	quote "example.com/server/utils"
 	firebase "firebase.google.com/go"
+	"github.com/gofiber/fiber/v2"
 	"github.com/imroc/req"
-	"github.com/julienschmidt/httprouter"
 	"google.golang.org/api/option"
 )
 
-type Handler struct {
-	ctx    context.Context
-	client firestore.Client
-}
-
-func (h *Handler) GetRandomQuoteRoute(rq *req.Req) httprouter.Handle {
-	return func(rw http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		res, err := rq.Get("https://node-quote.herokuapp.com/quote")
-
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		rw.WriteHeader(http.StatusOK)
-		rw.Write(res.Bytes())
-	}
-
-}
-
-func (h *Handler) AddQuote() httprouter.Handle {
-	return func(rw http.ResponseWriter, r *http.Request, _ httprouter.Params) {
-		reqBody, _ := io.ReadAll(r.Body)
-		body, _ := quote.UnmarshalQuote(reqBody)
-
-		docRef, _, _ := h.client.Collection("qoutes-dev").Add(h.ctx, map[string]string{
-			"title":   *body.Title,
-			"content": *body.Content,
-		})
-
-		rw.Write([]byte(docRef.ID))
-	}
-}
-
-func (h *Handler) GetQuoteById() httprouter.Handle {
-	return func(rw http.ResponseWriter, r *http.Request, p httprouter.Params) {
-		quoteId := p.ByName("id")
-
-		docRef, _ := h.client.Collection("qoutes-dev").Doc(quoteId).Get(h.ctx)
-
-		data := docRef.Data()
-
-		j, _ := json.Marshal(data)
-
-		rw.Write([]byte(j))
-	}
-}
-
 func main() {
-	port := os.Getenv("PORT")
-	rq := req.New()
+	var port string
+
+	value, isPortExists := os.LookupEnv("PORT")
+
+	if !isPortExists {
+		port = "1729"
+	} else {
+		port = value
+	}
 	ctx := context.Background()
-	mux := httprouter.New()
+	fiberApp := fiber.New()
 
 	opt := option.WithCredentialsFile("./database.json")
 	app, firebaseInitErr := firebase.NewApp(ctx, nil, opt)
@@ -81,14 +38,73 @@ func main() {
 	}
 	defer client.Close()
 
-	handler := Handler{
-		ctx:    ctx,
-		client: *client,
-	}
+	fiberApp.Get("/", func(c *fiber.Ctx) error {
+		rs, err := req.Get("https://node-quote.herokuapp.com/quote")
 
-	mux.GET("/", handler.GetRandomQuoteRoute(rq))
-	mux.GET("/quote/:id", handler.GetQuoteById())
-	mux.POST("/quote", handler.AddQuote())
+		if err != nil {
+			return c.SendString("error")
+		}
 
-	log.Fatal(http.ListenAndServe(":"+port, mux))
+		return c.SendString(string(rs.Bytes()))
+	})
+
+	fiberApp.Get("/getIdList", func(c *fiber.Ctx) error {
+
+		coll, err := client.Collection("quotes").Documents(ctx).GetAll()
+
+		if err != nil {
+			return c.SendString("something went wrong")
+		}
+
+		docSlice := make([]string, 0, 10)
+		for _, doc := range coll {
+			docSlice = append(docSlice, doc.Ref.ID)
+		}
+
+		docs := make(map[string]interface{})
+		rand.Seed(time.Now().UnixNano())
+
+		for i := 0; i < 20; i++ {
+			docId := docSlice[rand.Intn(len(docSlice))]
+			doc, _ := client.Collection("quotes").Doc(docId).Get(ctx)
+			docs[docId] = doc.Data()
+		}
+
+		return c.JSON(map[string]interface{}{"dcos": docSlice})
+	})
+
+	fiberApp.Get("/random", func(c *fiber.Ctx) error {
+		coll, err := client.Collection("quotes").Documents(ctx).GetAll()
+
+		if err != nil {
+			return c.SendString("something went wrong")
+		}
+
+		docSlice := make([]string, 0, 10)
+		for _, doc := range coll {
+			docSlice = append(docSlice, doc.Ref.ID)
+		}
+
+		// docs := make(map[string]interface{})
+		// rand.Seed(time.Now().UnixNano())
+
+		// for i := 0; i < 20; i++ {
+		// 	docId := docSlice[rand.Intn(len(docSlice))]
+		// 	doc, _ := client.Collection("quotes").Doc(docId).Get(ctx)
+		// 	docs[docId] = doc.Data()
+		// }
+
+		docs := make([]map[string]interface{}, 0, 20)
+		rand.Seed(time.Now().UnixNano())
+		for i := 0; i < 20; i++ {
+			docId := docSlice[rand.Intn(len(docSlice))]
+			doc, _ := client.Collection("quotes").Doc(docId).Get(ctx)
+			data := doc.Data()
+			docs = append(docs, data)
+		}
+
+		return c.JSON(map[string]interface{}{"total": 20, "data": docs})
+	})
+
+	fiberApp.Listen(":" + port)
 }
