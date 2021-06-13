@@ -106,5 +106,9 @@ func main() {
 		return c.JSON(map[string]interface{}{"total": 20, "data": docs})
 	})
 
+	fiberApp.Get("/getjson", func(c *fiber.Ctx) error {
+		return c.SendFile("./quote-database.json", true)
+	})
+
 	fiberApp.Listen(":" + port)
 }
